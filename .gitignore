@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Pytest
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+.dmypy.json
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Logs and runtime files
+*.log
+*.log.*
+*.pid
+*.seed
+*.cover
+coverage.xml
+htmlcov/
+
+# Docker
+*.local
+docker-compose.override.yml
+
+# Ignore secrets and local config
+*.env
+.env.*
+
+# Ignore editor swap files
+*~
+*.swp
+*.swo
+
+# testing
+test.jpg

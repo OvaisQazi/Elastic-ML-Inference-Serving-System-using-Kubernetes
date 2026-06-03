@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher-deployment
+  labels:
+    app: dispatcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatcher
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "9000"
+    spec:
+      containers:
+      - name: dispatcher
+        image: dispatcher:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9000
+        env:
+        - name: INFERENCE_URL
+          value: "http://inference-service:8080"
+        - name: MAX_QUEUE
+          value: "500"
+        - name: NUM_WORKERS
+          value: "1"          # autoscaler will call /scale to increase this
+        - name: REQUEST_TIMEOUT
+          value: "10.0"
+        resources:
+          requests:
+            cpu: "0.5"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9000
+          initialDelaySeconds: 15
+          periodSeconds: 10
