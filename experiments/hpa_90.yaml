@@ -1,0 +1,32 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-hpa-90
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference-deployment
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 90    # scale up when avg CPU > 90%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0     # react immediately on scale up
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 15               # add up to 2 pods every 15s
+    scaleDown:
+      stabilizationWindowSeconds: 120   # wait 120s before scaling down
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 30               # remove 1 pod every 30s

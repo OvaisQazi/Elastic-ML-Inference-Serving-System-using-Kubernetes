@@ -99,17 +99,12 @@ def get_metrics() -> dict:
         logger.warning(f"Discarding unrealistic p99={latency_p99:.3f}s")
         latency_p99 = None
 
-    # CPU utilisation per inference core (fraction of 1 CPU)
+    # CPU utilisation per inference pod (fraction of 1 CPU core)
+    # Uses process_cpu_seconds_total exposed by the FastAPI app directly
+    # avg() across all inference pods gives per-replica utilisation
     cpu_util = query_prometheus(
-        'avg(rate(container_cpu_usage_seconds_total'
-        '{pod=~"inference-.*", container="inference"}[1m]))'
+        'avg(rate(process_cpu_seconds_total{job="inference"}[1m]))'
     )
-    # Fallback without container label (works on some Minikube versions)
-    if cpu_util is None:
-        cpu_util = query_prometheus(
-            'avg(rate(container_cpu_usage_seconds_total'
-            '{pod=~"inference-.*"}[1m]))'
-        )
 
     # Request rate (requests/second) into dispatcher
     request_rate = query_prometheus(
