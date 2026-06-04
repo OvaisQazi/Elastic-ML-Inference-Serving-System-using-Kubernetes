@@ -58,4 +58,9 @@ docker-compose.override.yml
 *.swo
 
 # testing
-test.jpg
+*.jpg
+*.jpeg
+*.JPEG
+*.JPG
+*.png
+*.PNG
