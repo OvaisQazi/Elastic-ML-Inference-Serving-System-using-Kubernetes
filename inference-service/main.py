@@ -1,9 +1,10 @@
 import time
 import torch
-import torchvision.transforms as T
 from torchvision.models import resnet18, ResNet18_Weights
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from prometheus_client import Histogram, Counter, generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response
 from PIL import Image
 import io
 import logging
@@ -13,37 +14,45 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ResNet18 Inference Service")
 
-# Load model ONCE at startup (not per request — critical for latency)
+# Load model once at startup
 weights = ResNet18_Weights.IMAGENET1K_V1
 model = resnet18(weights=weights)
-model.eval()          # disable dropout/batchnorm training behavior
-model = model.cpu()   # explicit CPU — never GPU
+model.eval()
+model = model.cpu()
+preprocess = weights.transforms()
 
-preprocess = weights.transforms()  # official preprocessing pipeline
+# Prometheus metrics
+INFERENCE_LATENCY = Histogram(
+    "inference_latency_seconds", "Inference latency",
+    buckets=[0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0]
+)
+INFERENCE_COUNT = Counter("inference_requests_total", "Total inference requests")
+
 
 @app.get("/health")
 def health():
-    """Kubernetes liveness/readiness probe."""
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """
-    Accept a JPEG/PNG image, run ResNet18, return top-5 labels.
-    Design: one request at a time — no internal queue.
-    The Dispatcher is responsible for all queuing.
-    """
+    INFERENCE_COUNT.inc()
     t_start = time.time()
+
     try:
         img_bytes = await file.read()
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
-    # Preprocessing + inference (CPU)
     with torch.no_grad():
-        inp = preprocess(img).unsqueeze(0)   # [1, 3, 224, 224]
-        logits = model(inp)                   # [1, 1000]
+        inp = preprocess(img).unsqueeze(0)
+        logits = model(inp)
         probs = torch.softmax(logits, dim=1)
 
     top5 = probs[0].topk(5)
@@ -54,6 +63,7 @@ async def predict(file: UploadFile = File(...)):
     ]
 
     latency_ms = (time.time() - t_start) * 1000
+    INFERENCE_LATENCY.observe(latency_ms / 1000)
     logger.info(f"Inference done in {latency_ms:.1f}ms")
 
     return JSONResponse({

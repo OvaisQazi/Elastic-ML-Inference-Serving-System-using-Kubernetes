@@ -1,0 +1,102 @@
+# ── ServiceAccount ────────────────────────────────────────────────────
+# Gives the autoscaler pod a Kubernetes identity.
+# Without this it runs as "default" which has no permissions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autoscaler-sa
+  namespace: default
+
+---
+# ── ClusterRole ───────────────────────────────────────────────────────
+# Exactly the permissions the autoscaler needs — nothing more.
+#   get/list/watch deployments  → read current replica count
+#   patch deployments           → change replica count
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: autoscaler-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ── ClusterRoleBinding ────────────────────────────────────────────────
+# Binds the role to the service account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscaler-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: autoscaler-role
+subjects:
+- kind: ServiceAccount
+  name: autoscaler-sa
+  namespace: default
+
+---
+# ── Deployment ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoscaler-deployment
+  labels:
+    app: autoscaler
+spec:
+  replicas: 1          # always exactly 1 — only one autoscaler should run
+  selector:
+    matchLabels:
+      app: autoscaler
+  template:
+    metadata:
+      labels:
+        app: autoscaler
+    spec:
+      serviceAccountName: autoscaler-sa   # attach the RBAC identity
+      containers:
+      - name: autoscaler
+        image: autoscaler:latest
+        imagePullPolicy: Never            # use local Minikube image
+        env:
+        # ── Point to in-cluster service names ──────────────────────
+        - name: PROMETHEUS_URL
+          value: "http://prometheus-service:9090"
+        - name: DISPATCHER_URL
+          value: "http://dispatcher-service:9000"
+        # ── Scaling config (tune these for your experiments) ───────
+        - name: DEPLOYMENT_NAME
+          value: "inference-deployment"
+        - name: NAMESPACE
+          value: "default"
+        - name: MIN_REPLICAS
+          value: "1"
+        - name: MAX_REPLICAS
+          value: "8"
+        - name: CHECK_INTERVAL
+          value: "15"
+        - name: LATENCY_SLO
+          value: "0.4"
+        - name: LATENCY_EMERGENCY
+          value: "0.6"
+        - name: QUEUE_SCALE_UP
+          value: "5"
+        - name: QUEUE_EMERGENCY
+          value: "30"
+        - name: SCALE_UP_COOLDOWN
+          value: "30"
+        - name: SCALE_DOWN_COOLDOWN
+          value: "120"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        # No HTTP port needed — this is a pure control loop, not a server
