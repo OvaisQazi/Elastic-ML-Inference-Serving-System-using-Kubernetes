@@ -19,7 +19,7 @@ The goal of this project is to build an elastic machine learning inference servi
 * [x] FastAPI-based inference service
 * [x] Dispatcher service with request queueing
 * [x] Docker containerization
-* [ ] Kubernetes deployment
+* [x] Kubernetes deployment
 * [ ] Autoscaling implementation
 * [ ] Monitoring dashboards
 * [ ] Load testing and benchmarking
