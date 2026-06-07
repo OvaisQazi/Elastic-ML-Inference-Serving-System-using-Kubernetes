@@ -1,7 +1,5 @@
 #!/bin/bash
-# run_custom.sh
-# Experiment 3: Custom autoscaler
-# ─────────────────────────────────────
+# run_custom.sh — Experiment 3: Custom Autoscaler
 
 set -e
 
@@ -13,8 +11,7 @@ echo " Experiment 3: Custom Autoscaler"
 echo "============================================"
 
 echo "[1/5] Removing any active HPA..."
-kubectl delete hpa inference-hpa-70 --ignore-not-found
-kubectl delete hpa inference-hpa-90 --ignore-not-found
+kubectl delete hpa --all --ignore-not-found
 echo "      Done."
 
 echo "[2/5] Resetting inference to 1 replica..."
@@ -29,13 +26,15 @@ sleep 30
 kubectl get pods -l app=autoscaler
 echo "      Done."
 
-echo "[4/5] Starting load test — this will take ~10 minutes..."
+# No dispatcher_sync needed for custom experiment —
+# the autoscaler already calls /scale itself after every scaling decision.
+
+echo "[4/5] Starting load test (~10 minutes)..."
 cd ../load-tester
 python run_experiment.py --name "$EXPERIMENT_NAME" --dispatcher "$DISPATCHER_URL"
 cd ../experiments
 
 echo "[5/5] Done — leaving autoscaler running."
-echo "      To stop it: kubectl delete deployment autoscaler-deployment"
 
 echo ""
 echo "============================================"

@@ -1,14 +1,7 @@
 #!/bin/bash
-# run_hpa_70.sh
-# Experiment 1: HPA with CPU target 70%
-# ─────────────────────────────────────
-# 1. Tears down custom autoscaler
-# 2. Resets inference to 1 replica
-# 3. Applies HPA at 70% CPU target
-# 4. Runs the load tester
-# 5. Cleans up HPA when done
+# run_hpa_70.sh — Experiment 1: HPA CPU=70%
 
-set -e  # exit on any error
+set -e
 
 EXPERIMENT_NAME="hpa_70"
 DISPATCHER_URL="http://localhost:9000"
@@ -17,35 +10,38 @@ echo "============================================"
 echo " Experiment 1: HPA CPU=70%"
 echo "============================================"
 
-# ── Step 1: Tear down custom autoscaler ──────────────────────────────
-echo "[1/5] Removing custom autoscaler..."
+echo "[1/6] Removing custom autoscaler..."
 kubectl delete deployment autoscaler-deployment --ignore-not-found
 echo "      Done."
 
-# ── Step 2: Reset inference deployment to 1 replica ──────────────────
-echo "[2/5] Resetting inference to 1 replica..."
+echo "[2/6] Resetting inference to 1 replica..."
 kubectl scale deployment inference-deployment --replicas=1
 kubectl rollout status deployment/inference-deployment
 echo "      Done."
 
-# ── Step 3: Apply HPA ─────────────────────────────────────────────────
-echo "[3/5] Applying HPA (CPU target=70%)..."
-kubectl delete hpa inference-hpa-90 --ignore-not-found   # remove other HPA if present
+echo "[3/6] Applying HPA (CPU target=70%)..."
+kubectl delete hpa --all --ignore-not-found
 kubectl apply -f hpa_70.yaml
 echo "      Waiting 30s for HPA to initialise..."
 sleep 30
 kubectl get hpa inference-hpa-70
 echo "      Done."
 
-# ── Step 4: Run load tester ───────────────────────────────────────────
-echo "[4/5] Starting load test — this will take ~10 minutes..."
-echo "      Results will be saved to load-tester/results/${EXPERIMENT_NAME}/"
+echo "[4/6] Starting dispatcher sync sidecar..."
+cd ../load-tester
+python dispatcher_sync.py &
+SYNC_PID=$!
+echo "      Dispatcher sync PID=$SYNC_PID"
+sleep 3
+cd ../experiments
+
+echo "[5/6] Starting load test (~10 minutes)..."
 cd ../load-tester
 python run_experiment.py --name "$EXPERIMENT_NAME" --dispatcher "$DISPATCHER_URL"
 cd ../experiments
 
-# ── Step 5: Cleanup ───────────────────────────────────────────────────
-echo "[5/5] Cleaning up HPA..."
+echo "[6/6] Cleaning up..."
+kill $SYNC_PID 2>/dev/null || true
 kubectl delete hpa inference-hpa-70 --ignore-not-found
 echo "      Done."
 

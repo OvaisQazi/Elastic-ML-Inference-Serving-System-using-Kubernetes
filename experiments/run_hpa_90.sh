@@ -1,7 +1,5 @@
 #!/bin/bash
-# run_hpa_90.sh
-# Experiment 2: HPA with CPU target 90%
-# ─────────────────────────────────────
+# run_hpa_90.sh — Experiment 2: HPA CPU=90%
 
 set -e
 
@@ -12,29 +10,38 @@ echo "============================================"
 echo " Experiment 2: HPA CPU=90%"
 echo "============================================"
 
-echo "[1/5] Removing custom autoscaler..."
+echo "[1/6] Removing custom autoscaler..."
 kubectl delete deployment autoscaler-deployment --ignore-not-found
 echo "      Done."
 
-echo "[2/5] Resetting inference to 1 replica..."
+echo "[2/6] Resetting inference to 1 replica..."
 kubectl scale deployment inference-deployment --replicas=1
 kubectl rollout status deployment/inference-deployment
 echo "      Done."
 
-echo "[3/5] Applying HPA (CPU target=90%)..."
-kubectl delete hpa inference-hpa-70 --ignore-not-found
+echo "[3/6] Applying HPA (CPU target=90%)..."
+kubectl delete hpa --all --ignore-not-found
 kubectl apply -f hpa_90.yaml
 echo "      Waiting 30s for HPA to initialise..."
 sleep 30
 kubectl get hpa inference-hpa-90
 echo "      Done."
 
-echo "[4/5] Starting load test — this will take ~10 minutes..."
+echo "[4/6] Starting dispatcher sync sidecar..."
+cd ../load-tester
+python dispatcher_sync.py &
+SYNC_PID=$!
+echo "      Dispatcher sync PID=$SYNC_PID"
+sleep 3
+cd ../experiments
+
+echo "[5/6] Starting load test (~10 minutes)..."
 cd ../load-tester
 python run_experiment.py --name "$EXPERIMENT_NAME" --dispatcher "$DISPATCHER_URL"
 cd ../experiments
 
-echo "[5/5] Cleaning up HPA..."
+echo "[6/6] Cleaning up..."
+kill $SYNC_PID 2>/dev/null || true
 kubectl delete hpa inference-hpa-90 --ignore-not-found
 echo "      Done."
 

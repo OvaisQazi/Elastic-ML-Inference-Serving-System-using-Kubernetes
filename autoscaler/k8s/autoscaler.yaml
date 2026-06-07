@@ -79,7 +79,7 @@ spec:
         - name: MAX_REPLICAS
           value: "8"
         - name: CHECK_INTERVAL
-          value: "15"
+          value: "10"
         - name: LATENCY_SLO
           value: "0.4"
         - name: LATENCY_EMERGENCY
@@ -89,9 +89,9 @@ spec:
         - name: QUEUE_EMERGENCY
           value: "30"
         - name: SCALE_UP_COOLDOWN
-          value: "30"
+          value: "15"
         - name: SCALE_DOWN_COOLDOWN
-          value: "120"
+          value: "60"
         resources:
           requests:
             cpu: "100m"

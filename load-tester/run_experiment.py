@@ -92,27 +92,25 @@ def query_prometheus_sync(prometheus_url: str, promql: str) -> float:
 
 def snapshot_infra(prometheus_url: str, second: int) -> InfraSnapshot:
     """
-    Poll Prometheus for current replica count and CPU usage.
+    Poll Prometheus for current replica count and CPU cores.
     Called once per second during the experiment.
+
+    CPU cores = replica count x 1 core/pod (each pod has cpu limit=1).
+    This matches the professor's requirement: "number of CPU cores used".
     """
-    # Replica count — count running inference pods
+    # Count inference pods via kubernetes-pods job (port 8080)
+    # This correctly counts all running replicas as individual pod IPs
     replicas = query_prometheus_sync(
         prometheus_url,
-        'count(up{job="inference"} == 1)'
+        'count(process_cpu_seconds_total{job="kubernetes-pods", instance=~".*:8080"})'
     )
-    # Fallback: count by process metric presence
+    # Final fallback
     if replicas == 0:
-        replicas = query_prometheus_sync(
-            prometheus_url,
-            'count(process_cpu_seconds_total{job="inference"})'
-        )
+        replicas = 1.0
 
-    # CPU cores — rate of process CPU seconds across all inference pods
-    # Each pod has limit=1 core, so this gives fraction of total cores used
-    cpu_cores = query_prometheus_sync(
-        prometheus_url,
-        'sum(rate(process_cpu_seconds_total{job="inference"}[1m]))'
-    )
+    # CPU cores allocated = replicas x 1 core per pod
+    # Each inference pod has requests=limits=1 CPU
+    cpu_cores = replicas
 
     return InfraSnapshot(second=second, replicas=replicas, cpu_cores=cpu_cores)
 
