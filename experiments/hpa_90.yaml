@@ -25,8 +25,8 @@ spec:
         value: 2
         periodSeconds: 15               # add up to 2 pods every 15s
     scaleDown:
-      stabilizationWindowSeconds: 120   # wait 120s before scaling down
+      stabilizationWindowSeconds: 30   # wait 120s before scaling down
       policies:
       - type: Pods
         value: 1
-        periodSeconds: 30               # remove 1 pod every 30s
+        periodSeconds: 10               # remove 1 pod every 30s

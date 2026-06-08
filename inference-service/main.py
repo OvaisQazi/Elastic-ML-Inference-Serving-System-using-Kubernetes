@@ -19,6 +19,8 @@ weights = ResNet18_Weights.IMAGENET1K_V1
 model = resnet18(weights=weights)
 model.eval()
 model = model.cpu()
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
 preprocess = weights.transforms()
 
 # Prometheus metrics

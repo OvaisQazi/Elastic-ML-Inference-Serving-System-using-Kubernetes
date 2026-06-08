@@ -44,7 +44,7 @@ QUEUE_EMERGENCY        = int(os.getenv("QUEUE_EMERGENCY",         "30"))    # qu
 CPU_HIGH_FRACTION      = float(os.getenv("CPU_HIGH_FRACTION",     "0.75"))  # CPU safety net
 
 # Cooldowns (asymmetric: fast up, slow down)
-SCALE_UP_COOLDOWN_S    = int(os.getenv("SCALE_UP_COOLDOWN",   "15"))
+SCALE_UP_COOLDOWN_S    = int(os.getenv("SCALE_UP_COOLDOWN",   "0"))
 SCALE_DOWN_COOLDOWN_S  = int(os.getenv("SCALE_DOWN_COOLDOWN", "60"))
 
 # How many rate samples to keep for trend detection
@@ -266,7 +266,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
     gates = {
         "queue empty":      queue_len < QUEUE_SCALE_DOWN_THRESHOLD,
         "latency OK":       (latency_p99 is None or
-                             latency_p99 < LATENCY_SLO_S * 0.9),
+                             latency_p99 < LATENCY_SLO_S * 0.7),
         "rate not rising":  (slope is None or slope <= 0.0),
         "cpu OK":           cpu_util < CPU_HIGH_FRACTION * 0.6,
         "cooldown elapsed": down_ready,
