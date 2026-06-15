@@ -268,12 +268,9 @@ def save_results(
     with open(summary_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "second", "scheduled_qps",
-            "sent", "ok", "dropped", "timeouts",
-            "avg_latency_ms", "p50_latency_ms", "p99_latency_ms",
-            "throughput_rps",
-            "replicas",       # ← NEW: from Prometheus
-            "cpu_cores",      # ← NEW: from Prometheus
+            "second",
+            "p99_latency_ms",
+            "cpu_cores",
         ])
 
         for second, scheduled_qps in enumerate(TRACE):
@@ -281,24 +278,14 @@ def save_results(
             ok_results  = [r for r in sec_results if r.status == "ok"]
             lats        = sorted(r.latency_ms for r in ok_results)
 
-            sent     = len(sec_results)
-            ok       = len(ok_results)
-            dropped  = sum(1 for r in sec_results if r.status == "dropped")
-            timeouts = sum(1 for r in sec_results if r.status == "timeout")
-            avg_lat  = sum(lats) / len(lats) if lats else 0
-            p50      = lats[int(len(lats) * 0.50)] if lats else 0
             p99      = lats[int(len(lats) * 0.99)] if lats else 0
 
-            snap     = snap_map.get(second)
-            replicas  = snap.replicas  if snap else 0
+            snap      = snap_map.get(second)
             cpu_cores = snap.cpu_cores if snap else 0
 
             writer.writerow([
-                second, scheduled_qps,
-                sent, ok, dropped, timeouts,
-                f"{avg_lat:.2f}", f"{p50:.2f}", f"{p99:.2f}",
-                ok,
-                f"{replicas:.1f}",
+                second,
+                f"{p99:.2f}",
                 f"{cpu_cores:.4f}",
             ])
 

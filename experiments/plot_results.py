@@ -6,11 +6,8 @@ comparison graphs for the report.
 
 Graphs produced (saved to experiments/results/plots/):
   1. p99_latency.png   — p99 latency over time, all 3 experiments
-  2. throughput.png    — successful requests/s over time
-  3. dropped.png       — dropped + timeout requests over time
-  4. replicas.png      — replica count over time
-  5. cpu_cores.png     — CPU cores used over time
-  6. summary_bar.png   — bar chart: overall p99, drop rate, SLO violations
+  2. cpu_cores.png     — CPU cores used over time
+  3. summary_bar.png   — bar chart: avg latency + seconds with P99 > 500ms
 
 Usage:
     python plot_results.py
@@ -49,9 +46,6 @@ plt.rcParams.update({
     "lines.linewidth":  1.8,
 })
 
-SLO_MS = 400
-
-
 # ─────────────────────────────────────────────────────────────────────
 # Load data
 # ─────────────────────────────────────────────────────────────────────
@@ -81,8 +75,8 @@ def plot_p99_latency(dfs: dict):
         smoothed = df["p99_latency_ms"].rolling(5, min_periods=1).mean()
         ax.plot(df["second_min"], smoothed,
                 label=cfg["label"], color=cfg["color"], linestyle=cfg["style"])
-    ax.axhline(SLO_MS, color="black", linestyle=":", linewidth=1.2,
-               label=f"SLO = {SLO_MS}ms")
+    ax.axhline(500, color="black", linestyle=":", linewidth=1.2,
+               label=f"SLO = {500}ms")
     ax.set_title("P99 Latency Over Time")
     ax.set_xlabel("Time (minutes)")
     ax.set_ylabel("P99 Latency (ms)")
@@ -96,83 +90,7 @@ def plot_p99_latency(dfs: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Plot 2 — Throughput
-# ─────────────────────────────────────────────────────────────────────
-
-def plot_throughput(dfs: dict):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    first_df = next(iter(dfs.values()))
-    ax.fill_between(first_df["second_min"], first_df["scheduled_qps"],
-                    alpha=0.1, color="gray", label="Scheduled QPS")
-    for name, df in dfs.items():
-        cfg      = EXPERIMENTS[name]
-        smoothed = df["throughput_rps"].rolling(5, min_periods=1).mean()
-        ax.plot(df["second_min"], smoothed,
-                label=cfg["label"], color=cfg["color"], linestyle=cfg["style"])
-    ax.set_title("Throughput (Successful Requests/s)")
-    ax.set_xlabel("Time (minutes)")
-    ax.set_ylabel("Requests/s")
-    ax.legend()
-    ax.set_ylim(bottom=0)
-    out = PLOTS_DIR / "throughput.png"
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"  Saved: {out}")
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Plot 3 — Dropped + timeouts
-# ─────────────────────────────────────────────────────────────────────
-
-def plot_dropped(dfs: dict):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    for name, df in dfs.items():
-        cfg      = EXPERIMENTS[name]
-        lost     = df["dropped"] + df["timeouts"]
-        smoothed = lost.rolling(5, min_periods=1).mean()
-        ax.plot(df["second_min"], smoothed,
-                label=cfg["label"], color=cfg["color"], linestyle=cfg["style"])
-    ax.set_title("Lost Requests Over Time (Dropped + Timeouts)")
-    ax.set_xlabel("Time (minutes)")
-    ax.set_ylabel("Lost Requests/s")
-    ax.legend()
-    ax.set_ylim(bottom=0)
-    out = PLOTS_DIR / "dropped.png"
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"  Saved: {out}")
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Plot 4 — Replica count over time
-# ─────────────────────────────────────────────────────────────────────
-
-def plot_replicas(dfs: dict):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    for name, df in dfs.items():
-        if "replicas" not in df.columns:
-            continue
-        cfg      = EXPERIMENTS[name]
-        smoothed = df["replicas"].rolling(3, min_periods=1).mean()
-        ax.plot(df["second_min"], smoothed,
-                label=cfg["label"], color=cfg["color"], linestyle=cfg["style"])
-    ax.set_title("Replica Count Over Time")
-    ax.set_xlabel("Time (minutes)")
-    ax.set_ylabel("Number of Replicas")
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-    ax.legend()
-    ax.set_ylim(bottom=0)
-    out = PLOTS_DIR / "replicas.png"
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"  Saved: {out}")
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Plot 5 — CPU cores over time
+# Plot 2 — CPU cores over time
 # ─────────────────────────────────────────────────────────────────────
 
 def plot_cpu_cores(dfs: dict):
@@ -197,7 +115,7 @@ def plot_cpu_cores(dfs: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Plot 6 — Summary bar chart
+# Plot 3 — Summary bar chart: avg latency + SLO violations
 # ─────────────────────────────────────────────────────────────────────
 
 def plot_summary_bars(dfs: dict):
@@ -205,38 +123,28 @@ def plot_summary_bars(dfs: dict):
     labels = [EXPERIMENTS[n]["label"] for n in names]
     colors = [EXPERIMENTS[n]["color"] for n in names]
 
-    overall_p99    = []
-    drop_rates     = []
+    avg_latencies  = []
     slo_violations = []
 
     for name in names:
-        df    = dfs[name]
-        lats  = df["p99_latency_ms"]
-        ok    = df["ok"].sum()
-        lost  = (df["dropped"] + df["timeouts"]).sum()
-        total = ok + lost
-        overall_p99.append(lats.quantile(0.99))
-        drop_rates.append((lost / total * 100) if total > 0 else 0)
-        slo_violations.append((lats > SLO_MS).sum())
+        df   = dfs[name]
+        lats = df["p99_latency_ms"]
+        avg_latencies.append(lats.mean())
+        slo_violations.append((lats > 500).sum())
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
     fig.suptitle("Experiment Summary Comparison", fontsize=14, fontweight="bold")
 
-    axes[0].bar(labels, overall_p99, color=colors, edgecolor="white", width=0.5)
-    axes[0].axhline(SLO_MS, color="black", linestyle=":", linewidth=1.2,
-                    label=f"SLO={SLO_MS}ms")
-    axes[0].set_title("Overall P99 Latency")
+    axes[0].bar(labels, avg_latencies, color=colors, edgecolor="white", width=0.5)
+    axes[0].axhline(500, color="black", linestyle=":", linewidth=1.2,
+                    label=f"SLO = {500}ms")
+    axes[0].set_title("Average P99 Latency")
     axes[0].set_ylabel("ms")
     axes[0].legend(fontsize=9)
 
-    axes[1].bar(labels, drop_rates, color=colors, edgecolor="white", width=0.5)
-    axes[1].set_title("Request Loss Rate")
-    axes[1].set_ylabel("%")
-    axes[1].yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f%%"))
-
-    axes[2].bar(labels, slo_violations, color=colors, edgecolor="white", width=0.5)
-    axes[2].set_title("Seconds with P99 > SLO")
-    axes[2].set_ylabel("Seconds")
+    axes[1].bar(labels, slo_violations, color=colors, edgecolor="white", width=0.5)
+    axes[1].set_title(f"Request Batches with P99 > {500}ms")
+    axes[1].set_ylabel("Request Batches")
 
     for ax in axes:
         ax.tick_params(axis="x", rotation=10)
@@ -246,50 +154,6 @@ def plot_summary_bars(dfs: dict):
     fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f"  Saved: {out}")
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Print text summary table
-# ─────────────────────────────────────────────────────────────────────
-
-def print_comparison_table(dfs: dict):
-    print(f"\n{'─'*70}")
-    print(f"{'Metric':<30} {'HPA 70%':>12} {'HPA 90%':>12} {'Custom':>12}")
-    print(f"{'─'*70}")
-
-    rows = {
-        "Overall P99 latency (ms)": [],
-        "Avg latency (ms)":         [],
-        "Max P99 latency (ms)":     [],
-        "SLO violations (seconds)": [],
-        "Total dropped":            [],
-        "Total timeouts":           [],
-        "Loss rate (%)":            [],
-    }
-
-    for name in ["hpa_70", "hpa_90", "custom"]:
-        if name not in dfs:
-            for k in rows:
-                rows[k].append("N/A")
-            continue
-        df    = dfs[name]
-        lats  = df["p99_latency_ms"]
-        ok    = df["ok"].sum()
-        drop  = df["dropped"].sum()
-        tout  = df["timeouts"].sum()
-        total = ok + drop + tout
-
-        rows["Overall P99 latency (ms)"].append(f"{lats.quantile(0.99):.0f}")
-        rows["Avg latency (ms)"].append(f"{df['avg_latency_ms'].mean():.0f}")
-        rows["Max P99 latency (ms)"].append(f"{lats.max():.0f}")
-        rows["SLO violations (seconds)"].append(f"{(lats > SLO_MS).sum()}")
-        rows["Total dropped"].append(f"{drop}")
-        rows["Total timeouts"].append(f"{tout}")
-        rows["Loss rate (%)"].append(f"{(drop+tout)/total*100:.1f}%")
-
-    for metric, values in rows.items():
-        print(f"{metric:<30} {values[0]:>12} {values[1]:>12} {values[2]:>12}")
-    print(f"{'─'*70}\n")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -309,13 +173,9 @@ def main():
 
     print(f"\nGenerating plots → {PLOTS_DIR}")
     plot_p99_latency(dfs)
-    plot_throughput(dfs)
-    plot_dropped(dfs)
-    plot_replicas(dfs)
     plot_cpu_cores(dfs)
     plot_summary_bars(dfs)
 
-    print_comparison_table(dfs)
     print(f"Done. Open {PLOTS_DIR} to view the graphs.")
 
 
