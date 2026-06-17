@@ -1,16 +1,3 @@
-"""
-Custom Autoscaler for Elastic ML Inference System
-==================================================
-Strategy: Tiered, predictive + reactive hybrid
-
-Tier 1 — EMERGENCY : p99 latency > SLO            → scale up fast
-Tier 2 — PROACTIVE : queue building OR rate rising → scale up by 1
-Tier 3 — STEADY    : all signals calm              → hold or scale down
-
-Key advantage over HPA: we react to queue growth and request-rate
-trend BEFORE CPU saturates — giving us a head start on provisioning.
-"""
-
 import os
 import time
 import math
@@ -19,14 +6,14 @@ import collections
 import httpx
 from kubernetes import client, config
 
-# ── Logging ───────────────────────────────────────────────────────────
+# Configure a root logger for logging system
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ── Configuration (override via environment variables) ────────────────
+# Configuration (override via environment variables)
 PROMETHEUS_URL   = os.getenv("PROMETHEUS_URL",  "http://localhost:9090")
 DISPATCHER_URL   = os.getenv("DISPATCHER_URL",  "http://localhost:9000")
 DEPLOYMENT_NAME  = os.getenv("DEPLOYMENT_NAME", "inference-deployment")
@@ -50,20 +37,15 @@ SCALE_DOWN_COOLDOWN_S  = int(os.getenv("SCALE_DOWN_COOLDOWN", "60"))
 # How many rate samples to keep for trend detection
 RATE_WINDOW = 3
 
-# ── State ─────────────────────────────────────────────────────────────
+# Initialise the timestamps for scale events
 last_scale_up_time   = 0.0
 last_scale_down_time = 0.0
 
 # Sliding window of (timestamp, request_rate) for trend detection
 rate_history: collections.deque = collections.deque(maxlen=RATE_WINDOW)
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Prometheus helpers
-# ─────────────────────────────────────────────────────────────────────
-
+# Run a PromQL instant query and return the first scalar result.
 def query_prometheus(promql: str) -> float | None:
-    """Run a PromQL instant query and return the first scalar result."""
     try:
         resp = httpx.get(
             f"{PROMETHEUS_URL}/api/v1/query",
@@ -79,13 +61,8 @@ def query_prometheus(promql: str) -> float | None:
         logger.warning(f"Prometheus query failed [{promql[:60]}]: {e}")
         return None
 
-
+# Fetches metrics for the autoscaler
 def get_metrics() -> dict:
-    """
-    Fetch all signals needed for the scaling decision.
-    Returns a dict so callers can log/inspect each value.
-    """
-
     # Queue length — direct gauge from dispatcher
     queue_len = query_prometheus('dispatcher_queue_length{job="dispatcher"}')
 
@@ -119,16 +96,8 @@ def get_metrics() -> dict:
     }
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Rate trend detection
-# ─────────────────────────────────────────────────────────────────────
-
+# Estimate how fast the request rate is changing
 def compute_rate_slope() -> float | None:
-    """
-    Compute the linear slope of request-rate samples (req/s per second).
-    Positive slope → workload is growing → scale up early.
-    Needs at least 2 samples; returns None if not enough data.
-    """
     if len(rate_history) < 2:
         return None
 
@@ -140,17 +109,12 @@ def compute_rate_slope() -> float | None:
         return None
     slope = (rates[-1] - rates[0]) / dt   # Δ(req/s) / Δs
     return slope
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Kubernetes helpers
-# ─────────────────────────────────────────────────────────────────────
-
+# Get current replica count
 def get_current_replicas(apps_v1) -> int:
     dep = apps_v1.read_namespaced_deployment(DEPLOYMENT_NAME, NAMESPACE)
     return dep.spec.replicas or 1
 
-
+# Set the desired replica count
 def set_replicas(apps_v1, n: int):
     apps_v1.patch_namespaced_deployment(
         DEPLOYMENT_NAME, NAMESPACE,
@@ -158,7 +122,7 @@ def set_replicas(apps_v1, n: int):
     )
     logger.info(f"★  Kubernetes deployment patched → {n} replicas")
 
-
+# Notify the dispatcher about the updated replica count
 def notify_dispatcher(n: int):
     """Tell dispatcher to match its worker pool to the new replica count."""
     try:
@@ -171,11 +135,7 @@ def notify_dispatcher(n: int):
     except Exception as e:
         logger.warning(f"Could not notify dispatcher: {e}")
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Core decision engine  ← THIS is what beats HPA
-# ─────────────────────────────────────────────────────────────────────
-
+# Evaluate all signals and return the desired replica count
 def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
     """
     Three-tier decision.
@@ -194,11 +154,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
         rate_history.append((now, m["request_rate"]))
     slope = compute_rate_slope()
 
-    # ═════════════════════════════════════════════════════════════════
-    # TIER 1 — EMERGENCY SCALE UP
-    # Trigger: latency hard breach OR queue is critically long
-    # Action:  +2 or +3 replicas immediately (bypass up-cooldown)
-    # ═════════════════════════════════════════════════════════════════
+    # Emergency Scale UP 
     if latency_p99 is not None and latency_p99 >= LATENCY_EMERGENCY_S:
         desired  = min(current + 3, MAX_REPLICAS)
         reason   = (f"EMERGENCY: p99={latency_p99:.3f}s ≥ {LATENCY_EMERGENCY_S}s "
@@ -213,11 +169,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
         last_scale_up_time = now
         return desired, reason
 
-    # ═════════════════════════════════════════════════════════════════
-    # TIER 2 — PROACTIVE SCALE UP
-    # Trigger: latency SLO approaching, queue building, rate trending up
-    # Action:  +1 replica (respects up-cooldown)
-    # ═════════════════════════════════════════════════════════════════
+    # Proactive scale up
     up_ready = (now - last_scale_up_time) >= SCALE_UP_COOLDOWN_S
 
     proactive_triggers = []
@@ -248,15 +200,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
                       f"({wait:.0f}s remaining): " + ", ".join(proactive_triggers))
             return current, reason
 
-    # ═════════════════════════════════════════════════════════════════
-    # TIER 3 — STEADY STATE: hold or scale down
-    # Conditions to allow scale down (ALL must be true):
-    #   • queue is empty
-    #   • latency is comfortably below SLO
-    #   • rate trend is flat or falling
-    #   • CPU is low
-    #   • down-cooldown has elapsed
-    # ═════════════════════════════════════════════════════════════════
+    # Steady State: Hold or scale down
     if current <= MIN_REPLICAS:
         return current, "STEADY: at minimum replicas"
 
@@ -284,10 +228,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
         return current, reason
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Main loop
-# ─────────────────────────────────────────────────────────────────────
-
+# Main Loop
 # Needed by Tier 3 gate check — define here so it's accessible
 QUEUE_SCALE_DOWN_THRESHOLD = 1  # allow scale down only when queue is nearly empty
 

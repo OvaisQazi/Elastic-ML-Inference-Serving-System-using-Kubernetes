@@ -8,12 +8,14 @@ from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTEN
 from starlette.responses import Response
 import os
 
+# Configure a root logger for logging system
 logging.basicConfig(level=logging.INFO)
+# Create a specific logger object for this file
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dispatcher")
 
-# ── Prometheus metrics ──────────────────────────────────────────────
+# Defining metrics for prometheus
 REQUEST_COUNT  = Counter("dispatcher_requests_total", "Total requests received")
 DROPPED_COUNT  = Counter("dispatcher_requests_dropped_total", "Requests dropped")
 LATENCY_HIST   = Histogram("dispatcher_latency_seconds", "End-to-end latency",
@@ -21,26 +23,19 @@ LATENCY_HIST   = Histogram("dispatcher_latency_seconds", "End-to-end latency",
 QUEUE_LENGTH   = Gauge("dispatcher_queue_length", "Current queue length")
 WORKER_COUNT   = Gauge("dispatcher_worker_count", "Current number of workers")
 
-# ── Config ──────────────────────────────────────────────────────────
+# Configuring variables for inference server and queue
 INFERENCE_URL   = os.getenv("INFERENCE_URL", "http://localhost:8080")
 MAX_QUEUE_SIZE  = int(os.getenv("MAX_QUEUE", "500"))
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "10.0"))
 NUM_WORKERS     = int(os.getenv("NUM_WORKERS", "1"))
 
-# ── State ────────────────────────────────────────────────────────────
+# Initialise the queue and number of workers
 queue: asyncio.Queue = None
 current_workers: int = 0
 
 
-# ── Worker management ────────────────────────────────────────────────
-
+# Dynamically adjust the number of available worker pods after scale-up or scale-down
 async def scale_workers(n: int):
-    """
-    Dynamically adjust the number of queue workers to match
-    the current replica count. Called on startup and by /scale endpoint.
-    Scale up: spawn new worker coroutines.
-    Scale down: send poison pills so excess workers exit cleanly.
-    """
     global current_workers
 
     if n > current_workers:
@@ -58,13 +53,8 @@ async def scale_workers(n: int):
     WORKER_COUNT.set(current_workers)
     logger.info(f"Worker count is now {current_workers}")
 
-
+# It handles the request being sent to inference pod such that one request is sent to inference pod and shuts down the inference pod if request is None
 async def queue_worker(worker_id: int):
-    """
-    Each worker pulls one request at a time from the queue,
-    forwards it to the inference service, and resolves the future.
-    Exits cleanly when it receives a None (poison pill).
-    """
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         while True:
             item = await queue.get()
@@ -109,8 +99,7 @@ async def queue_worker(worker_id: int):
                 queue.task_done()
 
 
-# ── Startup ──────────────────────────────────────────────────────────
-
+# Initialise shared state and launch workers at start
 @app.on_event("startup")
 async def startup():
     global queue
@@ -119,14 +108,9 @@ async def startup():
     logger.info(f"Dispatcher ready — inference at {INFERENCE_URL}")
 
 
-# ── Endpoints ────────────────────────────────────────────────────────
-
+# Main dispatcher pod endpoint
 @app.post("/predict")
 async def dispatch(file: UploadFile = File(...)):
-    """
-    Receive an image request, enqueue it, wait for the worker
-    to process it and return the inference result.
-    """
     REQUEST_COUNT.inc()
     img_bytes = await file.read()
     t_arrival = time.time()
@@ -149,24 +133,19 @@ async def dispatch(file: UploadFile = File(...)):
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Request timed out")
 
-
+# Matches the current worker count to the autoscaler
 @app.post("/scale")
 async def scale(replicas: int = Query(..., gt=0, le=20)):
-    """
-    Called by the autoscaler after it changes the Kubernetes
-    replica count. Adjusts worker count to match.
-    """
     logger.info(f"Scale request received: {replicas} replicas")
     await scale_workers(replicas)
     return {"workers": current_workers}
 
-
+# Endpoint for Prometheus to scrape
 @app.get("/metrics")
 def metrics():
-    """Prometheus scrape endpoint."""
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-
+# Endpoint for Liveness probe
 @app.get("/health")
 def health():
     return {
@@ -175,7 +154,7 @@ def health():
         "workers": current_workers
     }
 
-
+# Endpoint that returns queue depth
 @app.get("/queue_length")
 def queue_length():
     return {"queue_length": queue.qsize() if queue else 0}

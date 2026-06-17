@@ -1,17 +1,3 @@
-"""
-dispatcher_sync.py
-------------------
-Watches the inference deployment replica count every 5 seconds.
-When it changes, calls POST /scale on the dispatcher so worker
-count always matches replica count.
-
-Run this on your laptop alongside any experiment:
-    python dispatcher_sync.py
-
-Keep it running in a separate terminal for the full experiment duration.
-Works for both HPA and custom autoscaler experiments.
-"""
-
 import time
 import logging
 import httpx
@@ -23,20 +9,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────
 DISPATCHER_URL   = "http://localhost:9000"
 DEPLOYMENT_NAME  = "inference-deployment"
 NAMESPACE        = "default"
 POLL_INTERVAL_S  = 5   # check every 5 seconds
 
-
+# Return No. of ready pods
 def get_ready_replicas(apps_v1) -> int:
-    """Return the number of READY inference pods."""
     dep = apps_v1.read_namespaced_deployment(DEPLOYMENT_NAME, NAMESPACE)
     # ready_replicas can be None if no pods are ready yet
     return dep.status.ready_replicas or 1
 
-
+# Notify the dispatcher about how many workers to use
 def notify_dispatcher(replicas: int):
     try:
         resp = httpx.post(

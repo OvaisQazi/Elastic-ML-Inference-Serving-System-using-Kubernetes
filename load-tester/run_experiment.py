@@ -1,24 +1,3 @@
-"""
-run_experiment.py
------------------
-Drives the workload trace against the dispatcher and records:
-  - per-request latency
-  - dropped requests (429)
-  - timed-out requests (504)
-  - QPS actually sent vs scheduled
-  - replica count per second        ← polled from Prometheus
-  - CPU cores used per second       ← polled from Prometheus
-
-Results are saved to results/<experiment_name>/
-  raw.csv        — one row per request
-  summary.csv    — one row per second (aggregated + infra metrics)
-
-Usage:
-    python run_experiment.py --name hpa_70 --dispatcher http://localhost:9000
-    python run_experiment.py --name custom  --dispatcher http://localhost:9000
-    python run_experiment.py --name hpa_70 --prometheus http://localhost:9090
-"""
-
 import argparse
 import asyncio
 import csv
@@ -33,25 +12,21 @@ import httpx
 
 from workload import TRACE, DURATION_S
 
-# ── Logging ───────────────────────────────────────────────────────────
+# Timestamped logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ── Paths ─────────────────────────────────────────────────────────────
+# Image directory
 IMAGES_DIR = Path(__file__).parent / "sample_images"
 
-# ── Defaults ──────────────────────────────────────────────────────────
+# Define URLs
 DEFAULT_DISPATCHER  = "http://localhost:9000"
 DEFAULT_PROMETHEUS  = "http://localhost:9090"
 REQUEST_TIMEOUT     = 12.0
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Data classes
-# ─────────────────────────────────────────────────────────────────────
 
 @dataclass
 class RequestResult:
@@ -62,19 +37,14 @@ class RequestResult:
     status_code: int
 
 @dataclass
+#Take Prometheus every second
 class InfraSnapshot:
-    """One Prometheus snapshot taken at the start of each second."""
     second:       int
     replicas:     float   # current replica count
     cpu_cores:    float   # avg CPU cores used across inference pods
 
-
-# ─────────────────────────────────────────────────────────────────────
 # Prometheus helpers
-# ─────────────────────────────────────────────────────────────────────
-
 def query_prometheus_sync(prometheus_url: str, promql: str) -> float:
-    """Synchronous Prometheus instant query. Returns 0.0 on any failure."""
     try:
         resp = httpx.get(
             f"{prometheus_url}/api/v1/query",
@@ -89,15 +59,8 @@ def query_prometheus_sync(prometheus_url: str, promql: str) -> float:
     except Exception:
         return 0.0
 
-
+# Poll prometheus for current replica count and CPU cores
 def snapshot_infra(prometheus_url: str, second: int) -> InfraSnapshot:
-    """
-    Poll Prometheus for current replica count and CPU cores.
-    Called once per second during the experiment.
-
-    CPU cores = replica count x 1 core/pod (each pod has cpu limit=1).
-    This matches the professor's requirement: "number of CPU cores used".
-    """
     # Count inference pods via kubernetes-pods job (port 8080)
     # This correctly counts all running replicas as individual pod IPs
     replicas = query_prometheus_sync(
@@ -114,11 +77,7 @@ def snapshot_infra(prometheus_url: str, second: int) -> InfraSnapshot:
 
     return InfraSnapshot(second=second, replicas=replicas, cpu_cores=cpu_cores)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # Image loader
-# ─────────────────────────────────────────────────────────────────────
-
 def load_images() -> list[bytes]:
     if not IMAGES_DIR.exists():
         raise FileNotFoundError(
@@ -134,11 +93,7 @@ def load_images() -> list[bytes]:
     logger.info(f"Loaded {len(images)} sample image(s)")
     return images
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Single request
-# ─────────────────────────────────────────────────────────────────────
-
+# Send an image to /predict and classify the outcome
 async def send_request(
     client: httpx.AsyncClient,
     image_bytes: bytes,
@@ -164,11 +119,7 @@ async def send_request(
         logger.warning(f"Request error: {e}")
         return RequestResult(second, sent_at, -1, "error", 0)
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Experiment runner
-# ─────────────────────────────────────────────────────────────────────
-
+# Experiment Runner
 async def run_experiment(
     name: str,
     dispatcher_url: str,
@@ -237,11 +188,7 @@ async def run_experiment(
     logger.info(f"Experiment '{name}' complete in {total_elapsed:.1f}s")
     return results, snapshots
 
-
-# ─────────────────────────────────────────────────────────────────────
-# CSV output
-# ─────────────────────────────────────────────────────────────────────
-
+# Write per-request data and per-second summary
 def save_results(
     name: str,
     results: list[RequestResult],
@@ -291,7 +238,7 @@ def save_results(
 
     logger.info(f"Saved summary → {summary_path}")
 
-
+# Print a summary of the whole run
 def print_summary(name: str, results: list[RequestResult],
                   snapshots: list[InfraSnapshot]):
     total    = len(results)
@@ -317,9 +264,6 @@ def print_summary(name: str, results: list[RequestResult],
     print(f"{'─'*55}\n")
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Run a load test experiment")
