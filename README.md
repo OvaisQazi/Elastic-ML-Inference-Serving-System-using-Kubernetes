@@ -128,5 +128,3 @@ Average p99 latency (left) and the number of time windows breaching the 500 ms S
 **Takeaway:** the custom autoscaler held the tightest tail latency by scaling ahead of the spike on queue and rate signals — at the cost of provisioning more pods. The CPU-only HPA either lagged the spike (70%) or never reacted (90%).
 
 ---
-
-> Place this `README.md` at the repository root so the image links (`experiments/results/plots/…`) resolve.
