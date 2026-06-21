@@ -190,7 +190,7 @@ def compute_desired_replicas(current: int, m: dict) -> tuple[int, str]:
 
     if proactive_triggers and current < MAX_REPLICAS:
         if up_ready:
-            desired = current + 1
+            desired = min(current + 1, MAX_REPLICAS)
             reason  = "PROACTIVE +1: " + ", ".join(proactive_triggers)
             last_scale_up_time = now
             return desired, reason
